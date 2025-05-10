@@ -1,0 +1,14 @@
+LICENSE.md
+README.md
+pyproject.toml
+setup.cfg
+pysilero_vad/__init__.py
+pysilero_vad/py.typed
+pysilero_vad.egg-info/PKG-INFO
+pysilero_vad.egg-info/SOURCES.txt
+pysilero_vad.egg-info/dependency_links.txt
+pysilero_vad.egg-info/requires.txt
+pysilero_vad.egg-info/top_level.txt
+pysilero_vad.egg-info/zip-safe
+pysilero_vad/models/silero_vad.onnx
+tests/test_vad.py
