@@ -6,6 +6,7 @@ import wave
 import os
 from typing import Optional, Callable, List
 from pysilero_vad import SileroVoiceActivityDetector
+from gpiozero import LED
 
 
 class SileroVad:
@@ -15,6 +16,7 @@ class SileroVad:
         self.threshold = threshold
         self.trigger_level = trigger_level
         self._activation = 0
+        self.last_prob = 0.0
     
     def __call__(self, audio_bytes: bytes | None) -> bool:
         if audio_bytes is None:
@@ -35,6 +37,7 @@ class SileroVad:
         
         # Use maximum probability
         max_prob = max(speech_probs)
+        self.last_prob = max_prob
         if max_prob >= self.threshold:
             # Speech detected
             self._activation += 1
@@ -53,7 +56,7 @@ class SileroVADRealtimeSD:
 
     def __init__(
         self,
-        threshold: float = 0.5,
+        threshold: float = 0.2,
         trigger_level: int = 2,
         channels: int = 1,
         samplerate: int = 16000,
@@ -61,7 +64,7 @@ class SileroVADRealtimeSD:
         device: Optional[int] = None,
         on_speech_detected: Optional[Callable[[bytes], None]] = None,
         buffer_duration_ms: int = 500,
-        min_silence_duration_ms: int = 1000,
+        min_silence_duration_ms: int = 500,
         save_detections: bool = False,
         save_dir: str = "speech_detections",
         verbose: bool = True
@@ -91,28 +94,23 @@ class SileroVADRealtimeSD:
         self.save_detections = save_detections
         self.save_dir = save_dir
         self.verbose = verbose
+        self.led = LED(17)
         
-        # Calculate chunk size based on detector's requirements
         detector_chunk_bytes = self.vad.detector.chunk_bytes()
         detector_chunk_samples = detector_chunk_bytes // 2  # 16-bit samples = 2 bytes per sample
         
-        # Set blocksize (in samples)
         self.blocksize = blocksize if blocksize is not None else detector_chunk_samples
         
-        # Make sure blocksize is at least the detector's required size
         if self.blocksize < detector_chunk_samples:
             self.blocksize = detector_chunk_samples
             
-        # Calculate buffer sizes in samples
         samples_per_ms = self.samplerate / 1000
         self.buffer_size_samples = int(buffer_duration_ms * samples_per_ms)
         self.silence_threshold_samples = int(min_silence_duration_ms * samples_per_ms)
         
-        # Create save directory if needed
         if self.save_detections and not os.path.exists(self.save_dir):
             os.makedirs(self.save_dir)
         
-        # State variables
         self._is_running = False
         self._stream = None
         self._thread = None
@@ -157,6 +155,9 @@ class SileroVADRealtimeSD:
         # Check for speech
         is_speech = self.vad(audio_bytes)
         
+        if self.verbose:
+            print(f"\rSpeech probability: {self.vad.last_prob:.3f}", end="", flush=True)
+
         if is_speech:
             # If we weren't already capturing speech, this is a new segment
             if not self._is_speech_active:
@@ -166,6 +167,7 @@ class SileroVADRealtimeSD:
                 self._speech_buffer = np.array([], dtype=np.int16)
                 # Include some audio before the detection point (from buffer)
                 self._speech_buffer = np.append(self._speech_buffer, self._audio_buffer)
+                self.led.on()
             else:
                 # Continue adding to existing speech segment
                 new_data = self._audio_buffer[-self.blocksize:]
@@ -187,6 +189,7 @@ class SileroVADRealtimeSD:
                 if self.verbose:
                     print("Silence detected - ending speech capture")
                 self._finalize_speech_segment()
+                self.led.off()
     
     def _finalize_speech_segment(self):
         """Process the completed speech segment."""
@@ -224,7 +227,7 @@ class SileroVADRealtimeSD:
         """Thread function for continuous monitoring."""
         try:
             while self._is_running:
-                time.sleep(0.1)  # Check every 100ms
+                time.sleep(0.01)  # Check every 100ms
                 
                 with self._lock:
                     # Process any data in the buffer
@@ -261,16 +264,18 @@ class SileroVADRealtimeSD:
             # Reset VAD
             self.vad(None)
         
-        # Start the input stream
+                # Start the input stream
         self._stream = sd.InputStream(
             samplerate=self.samplerate,
             blocksize=self.blocksize,
             device=self.device,
             channels=self.channels,
-            dtype='float32',
-            callback=self._audio_callback
+            dtype="float32",
+            callback=self._audio_callback,
+            latency='high',  # Use higher latency for more stable buffering
         )
         self._stream.start()
+
         
         # Start monitoring thread
         self._thread = threading.Thread(target=self._monitoring_thread)
@@ -306,44 +311,53 @@ class SileroVADRealtimeSD:
             if self._is_speech_active:
                 self._finalize_speech_segment()
         
+        self.led.off()
         if self.verbose:
             print("Voice activity detection stopped")
 
-
 def demo():
-    """Demo function to test the SileroVADRealtimeSD class."""
+    """Demo function to test the model class."""
+
     def on_speech(audio_bytes):
         duration_ms = (len(audio_bytes) / 2) / 16  # 16-bit samples at 16kHz
         print(f"Speech detected: {duration_ms:.2f}ms ({len(audio_bytes)} bytes)")
-    
-    # Create the VAD
+
+    devices = sd.query_devices()
+    input_devices = []
+
+    # List audio devices for debugging
+    for i, device in enumerate(devices):
+        if device['max_input_channels'] > 0:
+            print(f"[{i}] {device['name']}")
+            input_devices.append(i)
+
+    if not input_devices:
+        print("No input devices found!")
+        return
+
+    # Create the VAD with selected device
     vad = SileroVADRealtimeSD(
-        threshold=0.5,
-        trigger_level=2,
+        threshold=0.2, # Score for detecting speeches
+        trigger_level=1,
         save_detections=False,
-        on_speech_detected=on_speech
+        on_speech_detected=on_speech,
+        device=1,
+        blocksize=2048
     )
-    
+
     try:
-        # List available devices
-        print("Available audio devices:")
-        vad.list_devices()
-        
-        # Start the VAD
         vad.start()
-        
+
         # Keep the program running
-        print("Listening for speech... Press Ctrl+C to stop.")
+        print("\nListening for speech... Press Ctrl+C to stop.")
         while True:
-            time.sleep(0.1)
-    
+            time.sleep(0.001)
+
     except KeyboardInterrupt:
         print("\nStopping voice activity detection...")
-    
+
     finally:
         # Clean up
         vad.stop()
-
-
-if __name__ == "__main__":
+if __name__=="__main__":
     demo()

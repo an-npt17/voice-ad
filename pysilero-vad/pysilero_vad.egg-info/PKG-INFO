@@ -24,6 +24,9 @@ Requires-Dist: onnxruntime<2,>=1.18.0
 Requires-Dist: numpy
 Requires-Dist: pyaudio>=0.2.14
 Requires-Dist: sounddevice>=0.5.1
+Requires-Dist: matplotlib>=3.7.5
+Requires-Dist: seaborn>=0.13.2
+Requires-Dist: gpiozero>=2.0
 Dynamic: license-file
 
 # pySilero VAD

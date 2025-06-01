@@ -2,3 +2,6 @@ onnxruntime<2,>=1.18.0
 numpy
 pyaudio>=0.2.14
 sounddevice>=0.5.1
+matplotlib>=3.7.5
+seaborn>=0.13.2
+gpiozero>=2.0
