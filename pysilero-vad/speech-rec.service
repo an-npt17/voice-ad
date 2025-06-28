@@ -1,0 +1,21 @@
+[Unit]
+Description=Speech Recognition service
+After=sound.target
+Wants=sound.target
+
+[Service]
+Type=simple
+User=pi
+Group=pi
+WorkingDirectory=/home/pi
+ExecStart=bash /home/pi/speech-recognition.sh
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+StartLimitBurst=5
+StartLimitIntervalSec=30
+
+[Install]
+WantedBy=multi-user.target
