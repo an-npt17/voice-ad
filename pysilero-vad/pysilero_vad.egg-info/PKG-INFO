@@ -28,6 +28,7 @@ Requires-Dist: matplotlib>=3.7.5
 Requires-Dist: seaborn>=0.13.2
 Requires-Dist: gpiozero>=2.0
 Requires-Dist: scipy>=1.10.1
+Requires-Dist: pyserial>=3.5
 Dynamic: license-file
 
 # pySilero VAD

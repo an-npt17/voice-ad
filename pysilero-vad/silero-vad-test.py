@@ -8,6 +8,7 @@ import numpy as np
 import serial
 import sounddevice as sd
 from gpiozero import LED
+from scipy import signal
 
 from pysilero_vad import SileroVoiceActivityDetector
 
@@ -162,23 +163,31 @@ class SileroVADRealtimeSD:
 
     def _process_buffer(self):
         """Process the audio buffer to detect voice activity."""
+        # Calculate how many samples we need for the model
+        if self.need_resample:
+            # Calculate input samples needed to produce one model chunk after resampling
+            model_chunk_samples = self.vad.detector.chunk_bytes() // 2
+            input_samples_needed = int(
+                model_chunk_samples * self.samplerate / self.model_samplerate
+            )
+        else:
+            input_samples_needed = self.vad.detector.chunk_bytes() // 2
+
         # Make sure we have enough data
-        if len(self._audio_buffer) < self.blocksize:
+        if len(self._audio_buffer) < input_samples_needed:
             return
 
-        # Convert numpy array to bytes for VAD
-        audio_bytes = self._audio_buffer.tobytes()
+        # Take exactly the amount we need
+        audio_chunk = self._audio_buffer[:input_samples_needed]
+        audio_bytes = audio_chunk.tobytes()
 
         if self.need_resample:
-            from scipy import signal
-
             audio_np = np.frombuffer(audio_bytes, dtype=np.int16)
             resampled = signal.resample(
                 audio_np, int(len(audio_np) * self.model_samplerate / self.samplerate)
             )
-            audio_bytes = resampled.astype(np.int16).tobytes()
-        else:
-            audio_bytes = audio_bytes
+            audio_bytes = np.asarray(resampled, dtype=np.int16).tobytes()
+
         # Check for speech
         is_speech = self.vad(audio_bytes)
 
@@ -196,52 +205,6 @@ class SileroVADRealtimeSD:
                 if current_time - self.last_message_time >= 10:
                     self.ser.write(b"{6}\n")
                     self.last_message_time = current_time
-
-            else:
-                # Continue adding to existing speech segment
-                new_data = self._audio_buffer[-self.blocksize :]
-                self._speech_buffer = np.append(self._speech_buffer, new_data)
-
-            # Reset silence counter
-            self._silence_counter = 0
-        elif self._is_speech_active:
-            # We're in an active speech segment but no speech detected
-            # Add audio to speech buffer anyway in case speech restarts
-            new_data = self._audio_buffer[-self.blocksize :]
-            self._speech_buffer = np.append(self._speech_buffer, new_data)
-
-            # Increment silence counter
-            self._silence_counter += len(new_data)
-
-            # If silence is long enough, end the speech segment
-            if self._silence_counter >= self.silence_threshold_samples:
-                if self.verbose:
-                    print("Silence detected - ending speech capture")
-                self._finalize_speech_segment()
-                self.led.off()
-
-    def _send_message(self):
-        """Process the audio buffer to detect voice activity."""
-        # Make sure we have enough data
-        if len(self._audio_buffer) < self.blocksize:
-            return
-
-        # Convert numpy array to bytes for VAD
-        audio_bytes = self._audio_buffer.tobytes()
-
-        # Check for speech
-        is_speech = self.vad(audio_bytes)
-
-        if is_speech:
-            # If we weren't already capturing speech, this is a new segment
-            if not self._is_speech_active:
-                self._is_speech_active = True
-                self._speech_buffer = np.array([], dtype=np.int16)
-                # Include some audio before the detection point (from buffer)
-                self._speech_buffer = np.append(self._speech_buffer, self._audio_buffer)
-                self.speech_detected_since_last_serial = True
-                print(self.speech_detected_since_last_serial)
-                self.led.on()
 
             else:
                 # Continue adding to existing speech segment
@@ -419,8 +382,6 @@ def demo():
         trigger_level=1,
         save_detections=False,
         on_speech_detected=on_speech,
-        device=0,
-        blocksize=2048,
     )
 
     try:
