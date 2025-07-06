@@ -63,7 +63,8 @@ class SileroVADRealtimeSD:
         threshold: float = 0.2,
         trigger_level: int = 2,
         channels: int = 1,
-        samplerate: int = 16000,
+        samplerate: int = 48000,
+        model_samplerate: int = 16000,
         blocksize: Optional[int] = None,
         device: Optional[int] = None,
         on_speech_detected: Optional[Callable[[bytes], None]] = None,
@@ -93,6 +94,9 @@ class SileroVADRealtimeSD:
         self.vad = SileroVad(threshold=threshold, trigger_level=trigger_level)
         self.channels = channels
         self.samplerate = samplerate
+        self.model_samplerate = model_samplerate
+        self.need_resample = self.samplerate != self.model_samplerate
+
         self.device = device
         self.on_speech_detected = on_speech_detected
         self.save_detections = save_detections
@@ -165,6 +169,16 @@ class SileroVADRealtimeSD:
         # Convert numpy array to bytes for VAD
         audio_bytes = self._audio_buffer.tobytes()
 
+        if self.need_resample:
+            from scipy import signal
+
+            audio_np = np.frombuffer(audio_bytes, dtype=np.int16)
+            resampled = signal.resample(
+                audio_np, int(len(audio_np) * self.model_samplerate / self.samplerate)
+            )
+            audio_bytes = resampled.astype(np.int16).tobytes()
+        else:
+            audio_bytes = audio_bytes
         # Check for speech
         is_speech = self.vad(audio_bytes)
 
