@@ -173,16 +173,12 @@ class SileroVADRealtimeSD:
         audio_bytes = self._audio_buffer.tobytes()
 
         if self.need_resample:
-            import samplerate
+            from scipy import signal
 
             audio_np = np.frombuffer(audio_bytes, dtype=np.int16)
             # Calculate number of output samples to match required chunk size
             required_samples = required_chunk_bytes // 2  # 2 bytes per int16 sample
-            # Compute resample ratio
-            resample_ratio = required_samples / len(audio_np)
-            resampled = samplerate.resample(
-                audio_np.astype(np.float32), resample_ratio, "sinc_best"
-            )
+            resampled = signal.resample(audio_np, required_samples)
             audio_bytes = np.asarray(resampled, dtype=np.int16).tobytes()
 
         is_speech = self.vad(audio_bytes)
