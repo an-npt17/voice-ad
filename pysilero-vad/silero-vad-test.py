@@ -116,11 +116,10 @@ class SileroVADRealtimeSD:
             detector_chunk_bytes // 2
         )  # 16-bit samples = 2 bytes per sample
 
-        # self.blocksize = blocksize if blocksize is not None else detector_chunk_samples
-        self.blocksize = 512 if self.samplerate == 16000 else 256
+        self.blocksize = blocksize if blocksize is not None else detector_chunk_samples
 
-        # if self.blocksize < detector_chunk_samples:
-        #     self.blocksize = detector_chunk_samples
+        if self.blocksize < detector_chunk_samples:
+            self.blocksize = detector_chunk_samples
 
         samples_per_ms = self.samplerate / 1000
         self.buffer_size_samples = int(buffer_duration_ms * samples_per_ms)
@@ -174,12 +173,16 @@ class SileroVADRealtimeSD:
         audio_bytes = self._audio_buffer.tobytes()
 
         if self.need_resample:
-            from scipy import signal
+            import samplerate
 
             audio_np = np.frombuffer(audio_bytes, dtype=np.int16)
             # Calculate number of output samples to match required chunk size
             required_samples = required_chunk_bytes // 2  # 2 bytes per int16 sample
-            resampled = signal.resample(audio_np, required_samples)
+            # Compute resample ratio
+            resample_ratio = required_samples / len(audio_np)
+            resampled = samplerate.resample(
+                audio_np.astype(np.float32), resample_ratio, "sinc_best"
+            )
             audio_bytes = np.asarray(resampled, dtype=np.int16).tobytes()
 
         is_speech = self.vad(audio_bytes)
