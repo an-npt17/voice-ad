@@ -8,7 +8,6 @@ import numpy as np
 import serial
 import sounddevice as sd
 from gpiozero import LED
-from scipy import signal
 
 from pysilero_vad import SileroVoiceActivityDetector
 
@@ -61,7 +60,7 @@ class SileroVADRealtimeSD:
 
     def __init__(
         self,
-        threshold: float = 0.2,
+        threshold: float = 0.15,
         trigger_level: int = 2,
         channels: int = 1,
         samplerate: int = 48000,
@@ -118,6 +117,7 @@ class SileroVADRealtimeSD:
         )  # 16-bit samples = 2 bytes per sample
 
         self.blocksize = blocksize if blocksize is not None else detector_chunk_samples
+        print(self.blocksize)
 
         if self.blocksize < detector_chunk_samples:
             self.blocksize = detector_chunk_samples
@@ -163,32 +163,25 @@ class SileroVADRealtimeSD:
 
     def _process_buffer(self):
         """Process the audio buffer to detect voice activity."""
-        # Calculate how many samples we need for the model
-        if self.need_resample:
-            # Calculate input samples needed to produce one model chunk after resampling
-            model_chunk_samples = self.vad.detector.chunk_bytes() // 2
-            input_samples_needed = int(
-                model_chunk_samples * self.samplerate / self.model_samplerate
-            )
-        else:
-            input_samples_needed = self.vad.detector.chunk_bytes() // 2
-
         # Make sure we have enough data
-        if len(self._audio_buffer) < input_samples_needed:
+        if len(self._audio_buffer) < self.blocksize:
             return
 
-        # Take exactly the amount we need
-        audio_chunk = self._audio_buffer[:input_samples_needed]
-        audio_bytes = audio_chunk.tobytes()
+        # Get the required chunk size in bytes (should be 1024)
+        required_chunk_bytes = self.vad.detector.chunk_bytes()
+
+        # Convert numpy array to bytes for VAD
+        audio_bytes = self._audio_buffer.tobytes()
 
         if self.need_resample:
+            from scipy import signal
+
             audio_np = np.frombuffer(audio_bytes, dtype=np.int16)
-            resampled = signal.resample(
-                audio_np, int(len(audio_np) * self.model_samplerate / self.samplerate)
-            )
+            # Calculate number of output samples to match required chunk size
+            required_samples = required_chunk_bytes // 2  # 2 bytes per int16 sample
+            resampled = signal.resample(audio_np, required_samples)
             audio_bytes = np.asarray(resampled, dtype=np.int16).tobytes()
 
-        # Check for speech
         is_speech = self.vad(audio_bytes)
 
         if is_speech:
@@ -378,8 +371,6 @@ def demo():
 
     # Create the VAD with selected device
     vad = SileroVADRealtimeSD(
-        threshold=0.2,  # Score for detecting speeches
-        trigger_level=1,
         save_detections=False,
         on_speech_detected=on_speech,
     )
