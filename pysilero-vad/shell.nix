@@ -6,7 +6,9 @@ pkgs.stdenv.mkDerivation {
   name = "cuda-env-shell";
   buildInputs = with pkgs; [
     gcc12
-    portaudio # Here it is!
+    portaudio
+    uv
+    cmake
   ];
   shellHook = ''
     export CC=${pkgs.gcc12}/bin/gcc

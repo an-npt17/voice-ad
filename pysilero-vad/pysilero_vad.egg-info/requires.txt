@@ -7,3 +7,4 @@ seaborn>=0.13.2
 gpiozero>=2.0
 scipy>=1.10.1
 pyserial>=3.5
+samplerate>=0.2.1

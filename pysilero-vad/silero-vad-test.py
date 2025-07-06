@@ -116,11 +116,11 @@ class SileroVADRealtimeSD:
             detector_chunk_bytes // 2
         )  # 16-bit samples = 2 bytes per sample
 
-        self.blocksize = blocksize if blocksize is not None else detector_chunk_samples
-        print(self.blocksize)
+        # self.blocksize = blocksize if blocksize is not None else detector_chunk_samples
+        self.blocksize = 512 if self.samplerate == 16000 else 256
 
-        if self.blocksize < detector_chunk_samples:
-            self.blocksize = detector_chunk_samples
+        # if self.blocksize < detector_chunk_samples:
+        #     self.blocksize = detector_chunk_samples
 
         samples_per_ms = self.samplerate / 1000
         self.buffer_size_samples = int(buffer_duration_ms * samples_per_ms)
