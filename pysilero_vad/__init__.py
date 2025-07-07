@@ -21,7 +21,8 @@ class InvalidChunkSizeError(Exception):
 
 
 class SileroVoiceActivityDetector:
-    """Detects speech/silence using Silero VAD.
+    """
+    Detects speech/silence using Silero VAD.
 
     https://github.com/snakers4/silero-vad
     """
@@ -56,14 +57,16 @@ class SileroVoiceActivityDetector:
         self._state = np.zeros((2, 1, 128)).astype("float32")
 
     def __call__(self, audio: bytes) -> float:
-        """Return probability of speech [0-1] in a single audio chunk.
+        """
+        Return probability of speech [0-1] in a single audio chunk.
 
         Audio *must* be 512 samples of 16Khz 16-bit mono PCM.
         """
         return self.process_chunk(audio)
 
     def process_chunk(self, audio: bytes) -> float:
-        """Return probability of speech [0-1] in a single audio chunk.
+        """
+        Return probability of speech [0-1] in a single audio chunk.
 
         Audio *must* be 512 samples of 16Khz 16-bit mono PCM.
         """
@@ -76,7 +79,8 @@ class SileroVoiceActivityDetector:
         return self.process_array(audio_array)
 
     def process_array(self, audio_array: np.ndarray) -> float:
-        """Return probability of speech [0-1] in a single audio chunk.
+        """
+        Return probability of speech [0-1] in a single audio chunk.
 
         Audio *must* be 512 float samples [0-1] of 16Khz mono.
         """
@@ -102,7 +106,8 @@ class SileroVoiceActivityDetector:
         return out.squeeze()
 
     def process_chunks(self, audio: bytes) -> Iterable[float]:
-        """Return probability of speech in audio [0-1] for each chunk of audio.
+        """
+        Return probability of speech in audio [0-1] for each chunk of audio.
 
         Audio must be 16Khz 16-bit mono PCM.
         """
