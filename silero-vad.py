@@ -5,9 +5,11 @@ import wave
 from typing import Callable, Optional
 
 import numpy as np
-import serial
+
+# import serial
 import sounddevice as sd
-from gpiozero import LED
+
+# from gpiozero import LED
 from scipy import signal
 
 from pysilero_vad import SileroVoiceActivityDetector
@@ -111,13 +113,13 @@ class SileroVADRealtimeSD:
                     f"Will resample from {self.input_samplerate}Hz to {self.samplerate}Hz"
                 )
 
-        self.led = LED(17)
-        self.led.on()  # Turn on LED initially
-        time.sleep(3)  # Keep LED on for 3 seconds
-        self.led.off()
-
-        self.ser = serial.Serial("/dev/serial0")
-        self.ser.baudrate = 9600
+        # self.led = LED(17)
+        # self.led.on()  # Turn on LED initially
+        # time.sleep(3)  # Keep LED on for 3 seconds
+        # self.led.off()
+        #
+        # self.ser = serial.Serial("/dev/serial0")
+        # self.ser.baudrate = 9600
         self.last_message_time = 0  # Track the last time a message was sent
 
         detector_chunk_bytes = self.vad.detector.chunk_bytes()
@@ -206,10 +208,10 @@ class SileroVADRealtimeSD:
                 self._is_speech_active = True
                 self._speech_buffer = np.array([], dtype=np.int16)
                 self._speech_buffer = np.append(self._speech_buffer, self._audio_buffer)
-                self.led.on()
+                # self.led.on()
                 current_time = time.time()
                 if current_time - self.last_message_time >= 10:
-                    self.ser.write(b"{6}\n")
+                    # self.ser.write(b"{6}\n")
                     self.last_message_time = current_time
 
             else:
@@ -232,7 +234,7 @@ class SileroVADRealtimeSD:
                 if self.verbose:
                     print("Silence detected - ending speech capture")
                 self._finalize_speech_segment()
-                self.led.off()
+                # self.led.off()
 
     def _finalize_speech_segment(self):
         """Process the completed speech segment."""
@@ -332,7 +334,7 @@ class SileroVADRealtimeSD:
             if self.verbose:
                 print("Not running")
             return
-        self.ser.close()
+        # self.ser.close()
 
         self._is_running = False
 
@@ -350,7 +352,7 @@ class SileroVADRealtimeSD:
             if self._is_speech_active:
                 self._finalize_speech_segment()
 
-        self.led.off()
+        # self.led.off()
         if self.verbose:
             print("Voice activity detection stopped")
 
@@ -401,3 +403,4 @@ def demo():
 
 if __name__ == "__main__":
     demo()
+
