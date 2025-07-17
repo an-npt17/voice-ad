@@ -5,11 +5,9 @@ import wave
 from typing import Callable, Optional
 
 import numpy as np
-
-# import serial
+import serial
 import sounddevice as sd
-
-# from gpiozero import LED
+from gpiozero import LED
 from scipy import signal
 
 from pysilero_vad import SileroVoiceActivityDetector
@@ -113,13 +111,13 @@ class SileroVADRealtimeSD:
                     f"Will resample from {self.input_samplerate}Hz to {self.samplerate}Hz"
                 )
 
-        # self.led = LED(17)
-        # self.led.on()  # Turn on LED initially
-        # time.sleep(3)  # Keep LED on for 3 seconds
-        # self.led.off()
+        self.led = LED(17)
+        self.led.on()  # Turn on LED initially
+        time.sleep(3)  # Keep LED on for 3 seconds
+        self.led.off()
 
-        # self.ser = serial.Serial("/dev/serial0")
-        # self.ser.baudrate = 9600
+        self.ser = serial.Serial("/dev/serial0")
+        self.ser.baudrate = 9600
         self.last_message_time = 0  # Track the last time a message was sent
 
         detector_chunk_bytes = self.vad.detector.chunk_bytes()
@@ -127,9 +125,7 @@ class SileroVADRealtimeSD:
             detector_chunk_bytes // 2
         )  # 16-bit samples = 2 bytes per sample
 
-        # Calculate blocksize based on target sample rate
         if self.needs_resampling:
-            # Scale blocksize for input sample rate
             self.blocksize = (
                 blocksize
                 if blocksize is not None
@@ -170,7 +166,6 @@ class SileroVADRealtimeSD:
         if not self.needs_resampling:
             return audio_data
 
-        # Use scipy's resample function
         target_length = int(len(audio_data) * self.samplerate / self.input_samplerate)
         resampled = signal.resample(audio_data, target_length)
         return np.array(resampled, np.int16)
@@ -181,34 +176,25 @@ class SileroVADRealtimeSD:
             if self.verbose:
                 print(f"sounddevice status: {status}")
 
-        # Extract audio data from current frame and convert to int16
         audio_data = np.int16(indata[:, 0] * 32767)  # Only first channel if stereo
 
-        # Resample if necessary
         if self.needs_resampling:
             audio_data = self._resample_audio(audio_data)
 
         with self._lock:
-            # Add to buffer
             self._audio_buffer = np.append(self._audio_buffer, audio_data)
 
-            # Keep buffer at reasonable size
             if len(self._audio_buffer) > self.buffer_size_samples:
-                # Process the buffer
                 self._process_buffer()
-                # Keep only the latest part of the buffer
                 self._audio_buffer = self._audio_buffer[-self.blocksize :]
 
     def _process_buffer(self):
         """Process the audio buffer to detect voice activity."""
-        # Make sure we have enough data
         if len(self._audio_buffer) < self.blocksize:
             return
 
-        # Convert numpy array to bytes for VAD
         audio_bytes = self._audio_buffer.tobytes()
 
-        # Check for speech
         is_speech = self.vad(audio_bytes)
 
         if is_speech:
@@ -218,12 +204,11 @@ class SileroVADRealtimeSD:
                     print("Speech detected - starting capture")
                 self._is_speech_active = True
                 self._speech_buffer = np.array([], dtype=np.int16)
-                # Include some audio before the detection point (from buffer)
                 self._speech_buffer = np.append(self._speech_buffer, self._audio_buffer)
-                # self.led.on()
+                self.led.on()
                 current_time = time.time()
                 if current_time - self.last_message_time >= 10:
-                    # self.ser.write(b"{6}\n")
+                    self.ser.write(b"{6}\n")
                     self.last_message_time = current_time
 
             else:
@@ -242,23 +227,19 @@ class SileroVADRealtimeSD:
             # Increment silence counter
             self._silence_counter += len(new_data)
 
-            # If silence is long enough, end the speech segment
             if self._silence_counter >= self.silence_threshold_samples:
                 if self.verbose:
                     print("Silence detected - ending speech capture")
                 self._finalize_speech_segment()
-                # self.led.off()
+                self.led.off()
 
     def _finalize_speech_segment(self):
         """Process the completed speech segment."""
-        # Reset state
         self._is_speech_active = False
         self._silence_counter = 0
 
-        # Convert numpy array to bytes
         speech_bytes = self._speech_buffer.tobytes()
 
-        # Save the speech segment if requested
         if self.save_detections:
             filename = os.path.join(
                 self.save_dir,
@@ -350,12 +331,10 @@ class SileroVADRealtimeSD:
             if self.verbose:
                 print("Not running")
             return
-        # self.ser.close()
+        self.ser.close()
 
-        # Set flag to stop
         self._is_running = False
 
-        # Stop the stream
         if self._stream:
             self._stream.stop()
             self._stream.close()
@@ -366,12 +345,11 @@ class SileroVADRealtimeSD:
             self._thread.join(timeout=2.0)
             self._thread = None
 
-        # Finalize any active speech segment
         with self._lock:
             if self._is_speech_active:
                 self._finalize_speech_segment()
 
-        # self.led.off()
+        self.led.off()
         if self.verbose:
             print("Voice activity detection stopped")
 
@@ -386,7 +364,6 @@ def demo():
     devices = sd.query_devices()
     input_devices = []
 
-    # List audio devices for debugging
     for i, device in enumerate(devices):
         if device["max_input_channels"] > 0:
             print(f"[{i}] {device['name']}")
@@ -409,7 +386,6 @@ def demo():
     try:
         vad.start()
 
-        # Keep the program running
         print("\nListening for speech... Press Ctrl+C to stop.")
         while True:
             time.sleep(0.001)

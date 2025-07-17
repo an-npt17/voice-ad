@@ -61,6 +61,18 @@
         venv = pythonSet.mkVirtualEnv "${venvName}" workspace.deps.default;
       in
       {
+        packages.default = pkgs.writeShellApplication {
+          name = "run-silero-vad";
+          runtimeInputs = [
+            pkgs.uv
+            venv
+            pkgs.portaudio
+          ];
+          text = ''
+            export LD_LIBRARY_PATH="${pkgs.portaudio}/lib:${pkgs.stdenv.cc.libc}/lib"
+            uv run silero-vad.py
+          '';
+        };
         devShells.default = pkgs.mkShell {
           packages = [
             pkgs.uv
