@@ -4,7 +4,6 @@ version = "2.1.0"
 license = { text = "MIT" }
 description = "Pre-packaged voice activity detector using silero-vad"
 readme = "README.md"
-authors = [{ name = "Michael Hansen", email = "mike@rhasspy.org" }]
 keywords = ["voice", "activity", "vad"]
 classifiers = [
   "Development Status :: 3 - Alpha",
@@ -29,8 +28,6 @@ dependencies = [
   "resample>=1.10.1",
 ]
 
-[project.urls]
-"Source Code" = "http://github.com/rhasspy/pysilero-vad"
 
 [tool.setuptools]
 platforms = ["any"]
