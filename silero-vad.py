@@ -179,6 +179,7 @@ class SileroVADRealtimeSD:
         audio_data = np.int16(indata[:, 0] * 32767)  # Only first channel if stereo
 
         if self.needs_resampling:
+            audio_data = audio_data.astype(np.ndarray)
             audio_data = self._resample_audio(audio_data)
 
         with self._lock:
