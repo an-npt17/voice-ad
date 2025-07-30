@@ -1,7 +1,6 @@
 import os
 import threading
 import time
-import wave
 from typing import Callable, Optional
 
 import numpy as np
@@ -213,19 +212,14 @@ class SileroVADRealtimeSD:
                     self.last_message_time = current_time
 
             else:
-                # Continue adding to existing speech segment
                 new_data = self._audio_buffer[-self.blocksize :]
                 self._speech_buffer = np.append(self._speech_buffer, new_data)
 
-            # Reset silence counter
             self._silence_counter = 0
         elif self._is_speech_active:
-            # We're in an active speech segment but no speech detected
-            # Add audio to speech buffer anyway in case speech restarts
             new_data = self._audio_buffer[-self.blocksize :]
             self._speech_buffer = np.append(self._speech_buffer, new_data)
 
-            # Increment silence counter
             self._silence_counter += len(new_data)
 
             if self._silence_counter >= self.silence_threshold_samples:
@@ -246,25 +240,12 @@ class SileroVADRealtimeSD:
                 self.save_dir,
                 f"speech_{time.strftime('%Y%m%d-%H%M%S')}_{self._detection_count}.wav",
             )
-            self._save_audio(speech_bytes, filename)
             self._detection_count += 1
 
-        # Call the callback if provided
         if self.on_speech_detected:
             self.on_speech_detected(speech_bytes)
 
-        # Clear the speech buffer
         self._speech_buffer = np.array([], dtype=np.int16)
-
-    def _save_audio(self, audio_bytes: bytes, filename: str):
-        """Save audio bytes to a WAV file."""
-        with wave.open(filename, "wb") as wf:
-            wf.setnchannels(1)  # Mono
-            wf.setsampwidth(2)  # 16-bit audio
-            wf.setframerate(self.samplerate)  # Use target sample rate
-            wf.writeframes(audio_bytes)
-        if self.verbose:
-            print(f"Saved speech segment to {filename}")
 
     def _monitoring_thread(self):
         """Thread function for continuous monitoring."""
@@ -272,7 +253,6 @@ class SileroVADRealtimeSD:
             while self._is_running:
                 time.sleep(0.01)
                 with self._lock:
-                    # Process any data in the buffer
                     if len(self._audio_buffer) >= self.blocksize:
                         self._process_buffer()
 
@@ -295,7 +275,6 @@ class SileroVADRealtimeSD:
                 print("Already running")
             return
 
-        # Reset state
         with self._lock:
             self._is_running = True
             self._audio_buffer = np.array([], dtype=np.int16)
@@ -303,12 +282,11 @@ class SileroVADRealtimeSD:
             self._is_speech_active = False
             self._silence_counter = 0
 
-            # Reset VAD
             self.vad(None)
 
         # Start the input stream with input sample rate
         self._stream = sd.InputStream(
-            samplerate=self.input_samplerate,  # Use input sample rate here
+            samplerate=self.input_samplerate,
             blocksize=self.blocksize,
             device=self.device,
             channels=self.channels,
