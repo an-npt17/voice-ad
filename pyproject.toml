@@ -26,6 +26,7 @@ dependencies = [
   "scipy>=1.10.1",
   "pyserial>=3.5",
   "resample>=1.10.1",
+  "noisereduce>=3.0.3",
 ]
 
 
