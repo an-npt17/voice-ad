@@ -4,79 +4,13 @@ import time
 from typing import Callable, Optional
 
 import numpy as np
-
-# import serial
+import serial
 import sounddevice as sd
-import torch
-
-# from gpiozero import LED
+from gpiozero import LED
+from pyrnnoise import RNNoise
 from scipy import signal
 
 from pysilero_vad import SileroVoiceActivityDetector
-
-
-class SileroDenoiser:
-    """Silero denoise model wrapper for real-time audio enhancement."""
-
-    def __init__(self, model_name: str = "small_fast", device: str = "cpu"):
-        """
-        Initialize the Silero denoise model.
-
-        Args:
-            model_name: Model variant ('small_fast', 'large_fast', 'small_slow')
-            device: Device to run model on ('cpu' or 'cuda')
-        """
-        self.device = torch.device(device)
-        self.model_name = model_name
-
-        # Load the denoise model
-        try:
-            self.model, self.samples, self.utils = torch.hub.load(
-                repo_or_dir="snakers4/silero-models",
-                model="silero_denoise",
-                name=model_name,
-                device=self.device,
-                trust_repo=True,
-            )
-            self.model.eval()
-            torch.set_grad_enabled(False)
-            self.read_audio, self.save_audio, self.denoise_func = self.utils
-            print(f"Silero denoise model '{model_name}' loaded successfully")
-        except Exception as e:
-            print(f"Failed to load Silero denoise model: {e}")
-            self.model = None
-
-    def denoise_audio(self, audio_tensor: torch.Tensor) -> torch.Tensor:
-        """
-        Denoise audio tensor in real-time.
-
-        Args:
-            audio_tensor: Input audio tensor [1, samples] or [samples]
-
-        Returns:
-            Denoised audio tensor
-        """
-        if self.model is None:
-            return audio_tensor
-
-        try:
-            # Ensure correct dimensions [1, samples]
-            if audio_tensor.dim() == 1:
-                audio_tensor = audio_tensor.unsqueeze(0)
-            elif audio_tensor.dim() == 2 and audio_tensor.shape[0] != 1:
-                audio_tensor = audio_tensor.T
-
-            # Move to device and denoise
-            audio_tensor = audio_tensor.to(self.device)
-
-            with torch.no_grad():
-                denoised = self.model(audio_tensor)
-
-            return denoised.squeeze(0)  # Return [samples]
-
-        except Exception as e:
-            print(f"Denoising failed: {e}")
-            return audio_tensor.squeeze(0) if audio_tensor.dim() > 1 else audio_tensor
 
 
 class SileroVad:
@@ -119,7 +53,7 @@ class SileroVad:
 
 
 class SileroVADRealtimeSD:
-    """Real-time voice activity detection using Silero VAD with sounddevice and optional denoising."""
+    """Real-time voice activity detection using Silero VAD with sounddevice."""
 
     def __init__(
         self,
@@ -127,7 +61,9 @@ class SileroVADRealtimeSD:
         trigger_level: int = 2,
         channels: int = 1,
         samplerate: int = 16000,
-        input_samplerate: Optional[int] = None,
+        input_samplerate: Optional[
+            int
+        ] = None,  # NEW: Allow different input sample rate
         blocksize: Optional[int] = None,
         device: Optional[int] = None,
         on_speech_detected: Optional[Callable[[bytes], None]] = None,
@@ -136,14 +72,9 @@ class SileroVADRealtimeSD:
         save_detections: bool = False,
         save_dir: str = "speech_detections",
         verbose: bool = True,
-        # New denoise parameters
-        enable_denoise: bool = True,
-        denoise_model: str = "small_fast",
-        denoise_device: str = "cpu",
-        denoise_chunk_size: int = 8000,  # Process in chunks for real-time performance
     ):
         """
-        Initialize the real-time Silero VAD with optional denoising using sounddevice.
+        Initialize the real-time Silero VAD using sounddevice.
 
         Args:
             threshold: Voice detection threshold between 0 and 1
@@ -159,10 +90,6 @@ class SileroVADRealtimeSD:
             save_detections: Whether to save detected speech segments to WAV files
             save_dir: Directory to save speech detection files
             verbose: Whether to print status messages
-            enable_denoise: Whether to enable Silero denoising preprocessing
-            denoise_model: Silero denoise model variant ('small_fast', 'large_fast', 'small_slow')
-            denoise_device: Device for denoise model ('cpu' or 'cuda')
-            denoise_chunk_size: Chunk size for denoising processing
         """
         self.vad = SileroVad(threshold=threshold, trigger_level=trigger_level)
         self.channels = channels
@@ -176,20 +103,6 @@ class SileroVADRealtimeSD:
         self.save_dir = save_dir
         self.verbose = verbose
 
-        # Initialize denoiser if enabled
-        self.enable_denoise = enable_denoise
-        self.denoise_chunk_size = denoise_chunk_size
-        if self.enable_denoise:
-            self.denoiser = SileroDenoiser(
-                model_name=denoise_model, device=denoise_device
-            )
-            if self.verbose:
-                print(f"Denoise preprocessing enabled with model: {denoise_model}")
-        else:
-            self.denoiser = None
-            if self.verbose:
-                print("Denoise preprocessing disabled")
-
         # Setup resampling if needed
         self.needs_resampling = self.input_samplerate != self.samplerate
         if self.needs_resampling:
@@ -198,14 +111,15 @@ class SileroVADRealtimeSD:
                     f"Will resample from {self.input_samplerate}Hz to {self.samplerate}Hz"
                 )
 
-        # self.led = LED(17)
-        # self.led.on()  # Turn on LED initially
-        # time.sleep(3)  # Keep LED on for 3 seconds
-        # self.led.off()
-        #
-        # self.ser = serial.Serial("/dev/serial0")
-        # self.ser.baudrate = 9600
+        self.led = LED(17)
+        self.led.on()  # Turn on LED initially
+        time.sleep(3)  # Keep LED on for 3 seconds
+        self.led.off()
+
+        self.ser = serial.Serial("/dev/serial0")
+        self.ser.baudrate = 9600
         self.last_message_time = 0  # Track the last time a message was sent
+        self.denoiser = RNNoise(sample_rate=self.input_samplerate)
 
         detector_chunk_bytes = self.vad.detector.chunk_bytes()
         detector_chunk_samples = (
@@ -257,63 +171,20 @@ class SileroVADRealtimeSD:
         resampled = signal.resample(audio_data, target_length)
         return np.array(resampled, np.int16)
 
-    def _denoise_audio_chunk(self, audio_data: np.ndarray) -> np.ndarray:
-        """Apply denoising to audio chunk if enabled."""
-        if (
-            not self.enable_denoise
-            or self.denoiser is None
-            or self.denoiser.model is None
-        ):
-            return audio_data
-
-        try:
-            # Convert to float32 and normalize for denoising
-            audio_float = audio_data.astype(np.float32) / 32767.0
-
-            # Process in chunks for better real-time performance
-            if len(audio_float) > self.denoise_chunk_size:
-                denoised_chunks = []
-                for i in range(0, len(audio_float), self.denoise_chunk_size):
-                    chunk = audio_float[i : i + self.denoise_chunk_size]
-
-                    # Pad chunk if too small
-                    if len(chunk) < self.denoise_chunk_size:
-                        chunk = np.pad(chunk, (0, self.denoise_chunk_size - len(chunk)))
-
-                    chunk_tensor = torch.tensor(chunk, dtype=torch.float32)
-                    denoised_chunk = self.denoiser.denoise_audio(chunk_tensor)
-                    denoised_chunks.append(denoised_chunk.cpu().numpy())
-
-                denoised = np.concatenate(denoised_chunks)[: len(audio_float)]
-            else:
-                # Process small chunks directly
-                chunk_tensor = torch.tensor(audio_float, dtype=torch.float32)
-                denoised = self.denoiser.denoise_audio(chunk_tensor).cpu().numpy()
-
-            # Convert back to int16
-            denoised = np.clip(denoised * 32767.0, -32768, 32767)
-            return denoised.astype(np.int16)
-
-        except Exception as e:
-            if self.verbose:
-                print(f"Denoising failed, using original audio: {e}")
-            return audio_data
-
     def _audio_callback(self, indata, frames, time, status):
         """sounddevice callback for streaming audio processing."""
         if status:
             if self.verbose:
                 print(f"sounddevice status: {status}")
 
-        audio_data = np.int16(indata[:, 0] * 32767)  # Only first channel if stereo
+        preprocessed_audio_data = np.int16(
+            indata[:, 0] * 32767
+        )  # Only first channel if stereo
+        _, audio_data = self.denoiser.denoise_chunk(preprocessed_audio_data)
 
-        # Apply resampling if needed
         if self.needs_resampling:
+            audio_data = audio_data.astype(np.ndarray)
             audio_data = self._resample_audio(audio_data)
-
-        # Apply denoising if enabled
-        if self.enable_denoise:
-            audio_data = self._denoise_audio_chunk(audio_data)
 
         with self._lock:
             self._audio_buffer = np.append(self._audio_buffer, audio_data)
@@ -335,20 +206,14 @@ class SileroVADRealtimeSD:
             # If we weren't already capturing speech, this is a new segment
             if not self._is_speech_active:
                 if self.verbose:
-                    prob = self.vad.last_prob
-                    denoise_status = (
-                        "with denoising" if self.enable_denoise else "without denoising"
-                    )
-                    print(
-                        f"Speech detected ({prob:.3f}) - starting capture {denoise_status}"
-                    )
+                    print("Speech detected - starting capture")
                 self._is_speech_active = True
                 self._speech_buffer = np.array([], dtype=np.int16)
                 self._speech_buffer = np.append(self._speech_buffer, self._audio_buffer)
-                # self.led.on()
+                self.led.on()
                 current_time = time.time()
                 if current_time - self.last_message_time >= 10:
-                    # self.ser.write(b"{6}\n")
+                    self.ser.write(b"{6}\n")
                     self.last_message_time = current_time
 
             else:
@@ -408,17 +273,6 @@ class SileroVADRealtimeSD:
         """List available audio devices."""
         print(sd.query_devices())
 
-    def toggle_denoise(self, enabled: bool = False):
-        """Toggle denoising on/off during runtime."""
-        if not enabled:
-            self.enable_denoise = not self.enable_denoise
-        else:
-            self.enable_denoise = enabled
-
-        status = "enabled" if self.enable_denoise else "disabled"
-        if self.verbose:
-            print(f"Denoising {status}")
-
     def start(self):
         """Start real-time voice activity detection."""
         if self._is_running:
@@ -452,13 +306,8 @@ class SileroVADRealtimeSD:
         self._thread.daemon = True
         self._thread.start()
 
-        denoise_info = (
-            f" with {self.denoiser.model_name} denoising"
-            if self.enable_denoise
-            else " without denoising"
-        )
         if self.verbose:
-            print(f"Voice activity detection started{denoise_info}")
+            print("Voice activity detection started")
 
     def stop(self):
         """Stop real-time voice activity detection."""
@@ -466,7 +315,7 @@ class SileroVADRealtimeSD:
             if self.verbose:
                 print("Not running")
             return
-        # self.ser.close()
+        self.ser.close()
 
         self._is_running = False
 
@@ -484,13 +333,13 @@ class SileroVADRealtimeSD:
             if self._is_speech_active:
                 self._finalize_speech_segment()
 
-        # self.led.off()
+        self.led.off()
         if self.verbose:
             print("Voice activity detection stopped")
 
 
 def demo():
-    """Demo function to test the enhanced VAD model with denoising."""
+    """Demo function to test the model class."""
 
     def on_speech(audio_bytes):
         duration_ms = (len(audio_bytes) / 2) / 16  # 16-bit samples at 16kHz
@@ -504,13 +353,9 @@ def demo():
             print(f"[{i}] {device['name']}")
             input_devices.append(i)
 
-    enable_denoise = True
-    denoise_model = "small_fast"
-
-    # Check if CUDA is available
-    device_choice = "cuda" if torch.cuda.is_available() and enable_denoise else "cpu"
-    if enable_denoise:
-        print(f"Using device: {device_choice}")
+    if not input_devices:
+        print("No input devices found!")
+        return
 
     vad = SileroVADRealtimeSD(
         threshold=0.2,
@@ -518,18 +363,16 @@ def demo():
         save_detections=False,
         on_speech_detected=on_speech,
         blocksize=2048,
-        input_samplerate=48000,  # Input device runs at 48kHz
+        input_samplerate=16000,  # Input device runs at 48kHz
         samplerate=16000,  # VAD processes at 16kHz
-        enable_denoise=enable_denoise,
-        denoise_model=denoise_model if enable_denoise else "small_fast",
-        denoise_device=device_choice,
-        denoise_chunk_size=4000,  # Smaller chunks for lower latency
     )
 
     try:
         vad.start()
 
         print("\nListening for speech... Press Ctrl+C to stop.")
+        while True:
+            time.sleep(0.001)
 
     except KeyboardInterrupt:
         print("\nStopping voice activity detection...")

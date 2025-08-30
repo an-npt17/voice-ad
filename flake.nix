@@ -39,7 +39,7 @@
       let
         workspaceRoot = ./.;
         venvName = "venv";
-        python = pkgs.python311;
+        python = pkgs.python312;
 
         pkgs = import nixpkgs {
           inherit system;
