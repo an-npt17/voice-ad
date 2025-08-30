@@ -28,6 +28,7 @@ dependencies = [
   "resample>=1.10.1",
   "silero-vad>=6.0.0",
   "torchaudio>=2.4.1",
+  "omegaconf>=2.3.0",
 ]
 
 
