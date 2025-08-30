@@ -504,30 +504,8 @@ def demo():
             print(f"[{i}] {device['name']}")
             input_devices.append(i)
 
-    if not input_devices:
-        print("No input devices found!")
-        return
-
-    print("\nSelect denoising mode:")
-    print("[1] No denoising (original)")
-    print("[2] Small Fast (recommended for real-time)")
-    print("[3] Large Fast (better quality, more CPU)")
-    print("[4] Small Slow (best quality, highest latency)")
-
-    choice = input("Enter choice (1-4) or press Enter for default (2): ").strip()
-
-    if choice == "1":
-        enable_denoise = False
-        denoise_model = None
-    elif choice == "3":
-        enable_denoise = True
-        denoise_model = "large_fast"
-    elif choice == "4":
-        enable_denoise = True
-        denoise_model = "small_slow"
-    else:  # Default: choice == "2" or empty
-        enable_denoise = True
-        denoise_model = "small_fast"
+    enable_denoise = True
+    denoise_model = "small_fast"
 
     # Check if CUDA is available
     device_choice = "cuda" if torch.cuda.is_available() and enable_denoise else "cpu"
@@ -551,25 +529,7 @@ def demo():
     try:
         vad.start()
 
-        print(f"\nListening for speech... Press Ctrl+C to stop.")
-        if enable_denoise:
-            print("Press 'd' + Enter to toggle denoising on/off")
-
-        while True:
-            try:
-                # Non-blocking input check for denoising toggle
-                import select
-                import sys
-
-                if select.select([sys.stdin], [], [], 0.1):
-                    user_input = input().strip().lower()
-                    if user_input == "d" and enable_denoise:
-                        vad.toggle_denoise()
-                else:
-                    time.sleep(0.1)
-
-            except:
-                time.sleep(0.1)
+        print("\nListening for speech... Press Ctrl+C to stop.")
 
     except KeyboardInterrupt:
         print("\nStopping voice activity detection...")
