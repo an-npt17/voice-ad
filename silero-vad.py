@@ -3,7 +3,6 @@ import threading
 import time
 from typing import Callable, Optional
 
-import noisereduce as nr
 import numpy as np
 
 import serial
@@ -163,17 +162,6 @@ class SileroVADRealtimeSD:
         # Lock for thread safety
         self._lock = threading.Lock()
 
-    def _reduce_noise(self, audio_data: np.ndarray) -> np.ndarray:
-        """Apply spectral noise reduction to audio."""
-        # audio_data is int16 → convert to float32 for NR
-        audio_float = audio_data.astype(np.float32)
-
-        # Noise reduction
-        reduced = nr.reduce_noise(y=audio_float, sr=self.samplerate)
-
-        # Back to int16 for VAD
-        return np.array(reduced, dtype=np.int16)
-
     def _resample_audio(self, audio_data: np.ndarray) -> np.ndarray:
         """Resample audio from input sample rate to target sample rate."""
         if not self.needs_resampling:
@@ -206,9 +194,8 @@ class SileroVADRealtimeSD:
         """Process the audio buffer to detect voice activity."""
         if len(self._audio_buffer) < self.blocksize:
             return
-        clean_audio = self._reduce_noise(self._audio_buffer)
 
-        audio_bytes = clean_audio.tobytes()
+        audio_bytes = self._audio_buffer.tobytes()
 
         is_speech = self.vad(audio_bytes)
 
@@ -241,7 +228,7 @@ class SileroVADRealtimeSD:
                 if self.verbose:
                     print("Silence detected - ending speech capture")
                 self._finalize_speech_segment()
-                self.led.off()
+                # self.led.off()
 
     def _finalize_speech_segment(self):
         """Process the completed speech segment."""
@@ -343,7 +330,7 @@ class SileroVADRealtimeSD:
             if self._is_speech_active:
                 self._finalize_speech_segment()
 
-        # self.led.off()
+        self.led.off()
         if self.verbose:
             print("Voice activity detection stopped")
 
@@ -368,7 +355,7 @@ def demo():
         return
 
     vad = SileroVADRealtimeSD(
-        threshold=0.05,
+        threshold=0.2,
         trigger_level=1,
         save_detections=False,
         on_speech_detected=on_speech,
@@ -394,3 +381,4 @@ def demo():
 
 if __name__ == "__main__":
     demo()
+
