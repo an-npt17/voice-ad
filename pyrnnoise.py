@@ -19,7 +19,7 @@ from audiolab import Reader, Writer
 from audiolab.av import AudioGraph, aformat
 from tqdm import tqdm
 
-from pyrnnoise.rnnoise import (
+from rnnoise import (
     FRAME_SIZE,
     FRAME_SIZE_MS,
     SAMPLE_RATE,
