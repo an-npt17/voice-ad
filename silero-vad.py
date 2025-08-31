@@ -7,9 +7,9 @@ import numpy as np
 import serial
 import sounddevice as sd
 from gpiozero import LED
-from pyrnnoise import RNNoise
 from scipy import signal
 
+from pyrnnoise import RNNoise
 from pysilero_vad import SileroVoiceActivityDetector
 
 
