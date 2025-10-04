@@ -122,13 +122,13 @@ class SileroVADRealtimeSD:
                     f"Will resample from {self.input_samplerate}Hz to {self.samplerate}Hz"
                 )
 
-        # self.led = LED(17)
-        # self.led.on()
-        # time.sleep(3)
-        # self.led.off()
+        self.led = LED(17)
+        self.led.on()
+        time.sleep(3)
+        self.led.off()
 
-        # self.ser = serial.Serial("/dev/serial0")
-        # self.ser.baudrate = 9600
+        self.ser = serial.Serial("/dev/serial0")
+        self.ser.baudrate = 9600
         self.last_message_time = 0
 
         detector_chunk_bytes = self.vad.detector.chunk_bytes()
@@ -263,10 +263,10 @@ class SileroVADRealtimeSD:
                 self._is_speech_active = True
                 self._speech_buffer = np.array([], dtype=np.int16)
                 self._speech_buffer = np.append(self._speech_buffer, self._audio_buffer)
-                # self.led.on()
+                self.led.on()
                 current_time = time.time()
                 if current_time - self.last_message_time >= 10:
-                    # self.ser.write(b"{6}\n")
+                    self.ser.write(b"{6}\n")
                     self.last_message_time = current_time
 
             else:
@@ -382,7 +382,7 @@ class SileroVADRealtimeSD:
             if self.verbose:
                 print("Not running")
             return
-        # self.ser.close()
+        self.ser.close()
 
         self._is_running = False
 
@@ -414,7 +414,7 @@ class SileroVADRealtimeSD:
                     self._send_to_thingspeak(self.minute_detection_count)
                     self.minute_detection_count = 0
 
-        # self.led.off()
+        self.led.off()
         if self.verbose:
             print("Voice activity detection stopped")
 
