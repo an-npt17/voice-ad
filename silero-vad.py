@@ -4,14 +4,16 @@ import time
 from typing import Callable, Optional
 
 import numpy as np
-
+import requests
 import serial
 import sounddevice as sd
-
+from dotenv import load_dotenv
 from gpiozero import LED
 from scipy import signal
 
 from pysilero_vad import SileroVoiceActivityDetector
+
+load_dotenv()
 
 
 class SileroVad:
@@ -62,9 +64,7 @@ class SileroVADRealtimeSD:
         trigger_level: int = 2,
         channels: int = 1,
         samplerate: int = 16000,
-        input_samplerate: Optional[
-            int
-        ] = None,  # NEW: Allow different input sample rate
+        input_samplerate: Optional[int] = None,
         blocksize: Optional[int] = None,
         device: Optional[int] = None,
         on_speech_detected: Optional[Callable[[bytes], None]] = None,
@@ -73,6 +73,8 @@ class SileroVADRealtimeSD:
         save_detections: bool = False,
         save_dir: str = "speech_detections",
         verbose: bool = True,
+        thingspeak_api_key: Optional[str] = None,
+        thingspeak_field: int = 1,
     ):
         """
         Initialize the real-time Silero VAD using sounddevice.
@@ -91,18 +93,26 @@ class SileroVADRealtimeSD:
             save_detections: Whether to save detected speech segments to WAV files
             save_dir: Directory to save speech detection files
             verbose: Whether to print status messages
+            thingspeak_api_key: ThingSpeak Write API Key for sending detection counts
+            thingspeak_field: ThingSpeak field number to send detection count (1-8)
         """
         self.vad = SileroVad(threshold=threshold, trigger_level=trigger_level)
         self.channels = channels
-        self.samplerate = samplerate  # Target sample rate for VAD (16kHz)
-        self.input_samplerate = (
-            input_samplerate or samplerate
-        )  # Input device sample rate
+        self.samplerate = samplerate
+        self.input_samplerate = input_samplerate or samplerate
         self.device = device
         self.on_speech_detected = on_speech_detected
         self.save_detections = save_detections
         self.save_dir = save_dir
         self.verbose = verbose
+
+        # ThingSpeak configuration
+        self.thingspeak_api_key = thingspeak_api_key
+        self.thingspeak_field = thingspeak_field
+        self.thingspeak_url = "https://api.thingspeak.com/update"
+        self.minute_detection_count = 0
+        self.last_thingspeak_update = time.time()
+        self._thingspeak_lock = threading.Lock()
 
         # Setup resampling if needed
         self.needs_resampling = self.input_samplerate != self.samplerate
@@ -112,19 +122,17 @@ class SileroVADRealtimeSD:
                     f"Will resample from {self.input_samplerate}Hz to {self.samplerate}Hz"
                 )
 
-        self.led = LED(17)
-        self.led.on()  # Turn on LED initially
-        time.sleep(3)  # Keep LED on for 3 seconds
-        self.led.off()
-        
-        self.ser = serial.Serial("/dev/serial0")
-        self.ser.baudrate = 9600
-        self.last_message_time = 0  # Track the last time a message was sent
+        # self.led = LED(17)
+        # self.led.on()
+        # time.sleep(3)
+        # self.led.off()
+
+        # self.ser = serial.Serial("/dev/serial0")
+        # self.ser.baudrate = 9600
+        self.last_message_time = 0
 
         detector_chunk_bytes = self.vad.detector.chunk_bytes()
-        detector_chunk_samples = (
-            detector_chunk_bytes // 2
-        )  # 16-bit samples = 2 bytes per sample
+        detector_chunk_samples = detector_chunk_bytes // 2
 
         if self.needs_resampling:
             self.blocksize = (
@@ -142,7 +150,6 @@ class SileroVADRealtimeSD:
         if self.blocksize < detector_chunk_samples:
             self.blocksize = detector_chunk_samples
 
-        # Use target sample rate for buffer calculations
         samples_per_ms = self.samplerate / 1000
         self.buffer_size_samples = int(buffer_duration_ms * samples_per_ms)
         self.silence_threshold_samples = int(min_silence_duration_ms * samples_per_ms)
@@ -153,14 +160,64 @@ class SileroVADRealtimeSD:
         self._is_running = False
         self._stream = None
         self._thread = None
+        self._thingspeak_thread = None
         self._audio_buffer = np.array([], dtype=np.int16)
         self._speech_buffer = np.array([], dtype=np.int16)
         self._is_speech_active = False
         self._silence_counter = 0
         self._detection_count = 0
 
-        # Lock for thread safety
         self._lock = threading.Lock()
+
+    def _send_to_thingspeak(self, count: int):
+        """Send detection count to ThingSpeak."""
+        if not self.thingspeak_api_key:
+            return
+
+        try:
+            payload = {
+                "api_key": self.thingspeak_api_key,
+                f"field{self.thingspeak_field}": count,
+            }
+            response = requests.post(self.thingspeak_url, data=payload, timeout=10)
+
+            if response.status_code == 200:
+                if self.verbose:
+                    print(f"ThingSpeak: Sent {count} detections successfully")
+            else:
+                if self.verbose:
+                    print(
+                        f"ThingSpeak: Failed to send data (status {response.status_code})"
+                    )
+        except Exception as e:
+            if self.verbose:
+                print(f"ThingSpeak: Error sending data - {e}")
+
+    def _thingspeak_monitoring_thread(self):
+        """Thread function for periodic ThingSpeak updates."""
+        try:
+            while self._is_running:
+                time.sleep(1)  # Check every second
+
+                current_time = time.time()
+                elapsed = current_time - self.last_thingspeak_update
+
+                # Send update every 60 seconds (1 minute)
+                if elapsed >= 60:
+                    with self._thingspeak_lock:
+                        count = self.minute_detection_count
+                        self.minute_detection_count = 0
+                        self.last_thingspeak_update = current_time
+
+                    if self.verbose:
+                        print(
+                            f"ThingSpeak: Reporting {count} detections in last minute"
+                        )
+
+                    self._send_to_thingspeak(count)
+        except Exception as e:
+            if self.verbose:
+                print(f"Error in ThingSpeak thread: {e}")
 
     def _resample_audio(self, audio_data: np.ndarray) -> np.ndarray:
         """Resample audio from input sample rate to target sample rate."""
@@ -177,7 +234,7 @@ class SileroVADRealtimeSD:
             if self.verbose:
                 print(f"sounddevice status: {status}")
 
-        audio_data = np.int16(indata[:, 0] * 32767)  # Only first channel if stereo
+        audio_data = np.int16(indata[:, 0] * 32767)
 
         if self.needs_resampling:
             audio_data = audio_data.astype(np.ndarray)
@@ -200,17 +257,16 @@ class SileroVADRealtimeSD:
         is_speech = self.vad(audio_bytes)
 
         if is_speech:
-            # If we weren't already capturing speech, this is a new segment
             if not self._is_speech_active:
                 if self.verbose:
                     print("Speech detected - starting capture")
                 self._is_speech_active = True
                 self._speech_buffer = np.array([], dtype=np.int16)
                 self._speech_buffer = np.append(self._speech_buffer, self._audio_buffer)
-                self.led.on()
+                # self.led.on()
                 current_time = time.time()
                 if current_time - self.last_message_time >= 10:
-                    self.ser.write(b"{6}\n")
+                    # self.ser.write(b"{6}\n")
                     self.last_message_time = current_time
 
             else:
@@ -228,7 +284,6 @@ class SileroVADRealtimeSD:
                 if self.verbose:
                     print("Silence detected - ending speech capture")
                 self._finalize_speech_segment()
-                # self.led.off()
 
     def _finalize_speech_segment(self):
         """Process the completed speech segment."""
@@ -244,6 +299,10 @@ class SileroVADRealtimeSD:
             )
             self._detection_count += 1
 
+        # Increment the minute detection counter
+        with self._thingspeak_lock:
+            self.minute_detection_count += 1
+
         if self.on_speech_detected:
             self.on_speech_detected(speech_bytes)
 
@@ -258,7 +317,6 @@ class SileroVADRealtimeSD:
                     if len(self._audio_buffer) >= self.blocksize:
                         self._process_buffer()
 
-                # Check if we need to finalize speech when stopping
                 if not self._is_running and self._is_speech_active:
                     with self._lock:
                         self._finalize_speech_segment()
@@ -286,7 +344,10 @@ class SileroVADRealtimeSD:
 
             self.vad(None)
 
-        # Start the input stream with input sample rate
+        with self._thingspeak_lock:
+            self.minute_detection_count = 0
+            self.last_thingspeak_update = time.time()
+
         self._stream = sd.InputStream(
             samplerate=self.input_samplerate,
             blocksize=self.blocksize,
@@ -294,14 +355,23 @@ class SileroVADRealtimeSD:
             channels=self.channels,
             dtype="float32",
             callback=self._audio_callback,
-            latency="high",  # Use higher latency for more stable buffering
+            latency="high",
         )
         self._stream.start()
 
-        # Start monitoring thread
         self._thread = threading.Thread(target=self._monitoring_thread)
         self._thread.daemon = True
         self._thread.start()
+
+        # Start ThingSpeak monitoring thread
+        if self.thingspeak_api_key:
+            self._thingspeak_thread = threading.Thread(
+                target=self._thingspeak_monitoring_thread
+            )
+            self._thingspeak_thread.daemon = True
+            self._thingspeak_thread.start()
+            if self.verbose:
+                print("ThingSpeak monitoring started")
 
         if self.verbose:
             print("Voice activity detection started")
@@ -312,7 +382,7 @@ class SileroVADRealtimeSD:
             if self.verbose:
                 print("Not running")
             return
-        self.ser.close()
+        # self.ser.close()
 
         self._is_running = False
 
@@ -321,16 +391,30 @@ class SileroVADRealtimeSD:
             self._stream.close()
             self._stream = None
 
-        # Wait for thread to finish
         if self._thread:
             self._thread.join(timeout=2.0)
             self._thread = None
+
+        if self._thingspeak_thread:
+            self._thingspeak_thread.join(timeout=2.0)
+            self._thingspeak_thread = None
 
         with self._lock:
             if self._is_speech_active:
                 self._finalize_speech_segment()
 
-        self.led.off()
+        # Send final count to ThingSpeak before stopping
+        if self.thingspeak_api_key:
+            with self._thingspeak_lock:
+                if self.minute_detection_count > 0:
+                    if self.verbose:
+                        print(
+                            f"ThingSpeak: Sending final count of {self.minute_detection_count}"
+                        )
+                    self._send_to_thingspeak(self.minute_detection_count)
+                    self.minute_detection_count = 0
+
+        # self.led.off()
         if self.verbose:
             print("Voice activity detection stopped")
 
@@ -339,7 +423,7 @@ def demo():
     """Demo function to test the model class."""
 
     def on_speech(audio_bytes):
-        duration_ms = (len(audio_bytes) / 2) / 16  # 16-bit samples at 16kHz
+        duration_ms = (len(audio_bytes) / 2) / 16
         print(f"Speech detected: {duration_ms:.2f}ms ({len(audio_bytes)} bytes)")
 
     devices = sd.query_devices()
@@ -354,20 +438,26 @@ def demo():
         print("No input devices found!")
         return
 
+    # Replace with your actual ThingSpeak Write API Key
+    THINGSPEAK_API_KEY = os.getenv("THINGSPEAK_API_KEY")
+
     vad = SileroVADRealtimeSD(
         threshold=0.2,
         trigger_level=1,
         save_detections=False,
         on_speech_detected=on_speech,
         blocksize=2048,
-        input_samplerate=16000,  # Input device runs at 48kHz
-        samplerate=16000,  # VAD processes at 16kHz
+        input_samplerate=16000,
+        samplerate=16000,
+        thingspeak_api_key=THINGSPEAK_API_KEY,
+        thingspeak_field=1,
     )
 
     try:
         vad.start()
 
         print("\nListening for speech... Press Ctrl+C to stop.")
+        print("Detection counts will be sent to ThingSpeak every minute.")
         while True:
             time.sleep(0.001)
 
@@ -375,10 +465,8 @@ def demo():
         print("\nStopping voice activity detection...")
 
     finally:
-        # Clean up
         vad.stop()
 
 
 if __name__ == "__main__":
     demo()
-
